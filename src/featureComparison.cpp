@@ -34,7 +34,6 @@ float thresh = 3.5f; /* Threshold on difference of Gaussians for feature pruning
 float minScale = 0.0f; /* Minimum acceptable scale to remove fine-scale features */
 bool upScale = true; /* Whether to upscale image before extraction */
 
-//int ImproveHomography(SiftData &data, float *homography, int numLoops, float minScore, float maxAmbiguity, float thresh);
 
 int main(int, char**)
 {
@@ -78,31 +77,36 @@ int main(int, char**)
     std::cout << "Imported " << imported_objects << " objects." << std::endl;
   }
 
-  // Colors
+  // Create array of colors for each object
 
   std::vector<Scalar> colours;
   for (size_t i=0; i < imported_objects; i++)
   {
     Mat color(5,5, CV_8UC3, Scalar((int)(i*180.0/imported_objects), 255, 255));
     cvtColor(color, color, COLOR_HSV2BGR);
-    std::cout << "Angle " << (int)(i*180.0/(float)imported_objects) << " colour " << color.at<Vec3b>(Point(0,0)) <<std::endl;
+    std::cout << "Angle " << (int)(i*180.0/(float)imported_objects) << " color " << color.at<Vec3b>(Point(0,0)) <<std::endl;
     colours.push_back(color.at<Vec3b>(Point(0,0)));
   }
 
+
   std::vector<Mat> object_bw_img;
-//  object_bw_img.assign(imported_objects, object_img.at(0));
   for (size_t i=0; i < imported_objects; i++)
     {
       object_bw_img.push_back(Mat(object_img.at(0).cols, object_img.at(0).rows, CV_8UC3));
       cvtColor(object_img.at(i), object_bw_img.back(), COLOR_BGR2GRAY);
     }
 
-  InitCuda(camera_device);
-
   cv::Mat object_sift_img;
 
   CudaImage object_cuda_sift_img;
+  SiftData frame_sift_data, object_sift_data;
+  cv::Mat frame_sift_img;
+  CudaImage frame_cuda_sift_img;
 
+
+  if (enable_gpu && sift)
+  {
+  InitCuda(camera_device);
 
   object_bw_img.at(0).convertTo(object_sift_img, CV_32FC1);
   object_cuda_sift_img.Allocate(cap.get(CV_CAP_PROP_FRAME_WIDTH), cap.get(CV_CAP_PROP_FRAME_HEIGHT),
@@ -110,9 +114,7 @@ int main(int, char**)
 
   // Get a frame to initialize cudaSift
 //  cv::Mat frame_sift_img(cap.get(CV_CAP_PROP_FRAME_WIDTH), cap.get(CV_CAP_PROP_FRAME_HEIGHT), CV_32FC1);
-  cv::Mat frame_sift_img;
-  if (enable_gpu && sift)
-  {
+
     Mat ini_frame, ini_frame_bw;
 #ifdef video
   while (true)
@@ -130,17 +132,15 @@ int main(int, char**)
 
     cvtColor(ini_frame, ini_frame_bw, COLOR_BGR2GRAY);
     ini_frame_bw.convertTo(frame_sift_img, CV_32FC1);
-  }
 
-  CudaImage frame_cuda_sift_img;
+
   frame_cuda_sift_img.Allocate(cap.get(CV_CAP_PROP_FRAME_WIDTH), cap.get(CV_CAP_PROP_FRAME_HEIGHT),
                          cap.get(CV_CAP_PROP_FRAME_WIDTH), false, NULL, (float*)frame_sift_img.data);
 
   // Reserve memory on GPU as allocating is slow
-  SiftData frame_sift_data, object_sift_data;
   InitSiftData(frame_sift_data, 2500000, true, true);
   InitSiftData(object_sift_data, 2500000, true, true);
-
+  }
 
 
   cv::Ptr<Feature2D> feature_extractor;
@@ -227,8 +227,6 @@ int main(int, char**)
   }
 
 
-//  feature_extractor->compute(object_bw_img, object_keypoints, object_descriptors);
-
   clock_t clock_now = clock();
   clock_t clock_total, clock_extraction, clock_matching, clock_homography;
   int clocks_per_ms = CLOCKS_PER_SEC / 1000;
@@ -248,8 +246,6 @@ int main(int, char**)
 #else
     frame_img = imread("/home/teddy/env.jpg", 1);
 #endif
-
-    //orig_frame.copyTo(output_frame);
 
     cvtColor(frame_img, frame_bw_img, COLOR_BGR2GRAY);
 
@@ -283,50 +279,8 @@ int main(int, char**)
       feature_extractor->compute(frame_bw_img, frame_keypoints, frame_descriptors);
       }
     }
-//    if (enable_gpu)
-//    {
-//      if (sift)
-//      {
-//        frame_bw_img.convertTo(sift_img, CV_32FC1);
-//        cuda_sift_img.Download();
-//        ExtractSift(frame_sift_data, cuda_sift_img, numOctaves, initBlur, thresh, minScale, upScale);
-//      }
-//      else // SURF
-//      {
-////        cuda::GpuMat object_gpu_img(object_bw);
-//        cuda::GpuMat img_scene_Gpu(scene_bw);
-//        cuda::GpuMat keypoints_scene_Gpu, keypoints_object_Gpu;
-//        cuda::GpuMat descriptors_scene_Gpu, descriptors_object_Gpu;
-//
-//        cuda::SURF_CUDA surf(min_hessian);
-//        //surf( object_gpu_img, cuda::GpuMat(), object_gpu_keypoints, object_gpu_descriptors );
-//        surf(img_scene_Gpu, cuda::GpuMat(), keypoints_scene_Gpu, descriptors_scene_Gpu);
-//        std::cout << "Surf done." << std::endl;
-//      }
-//    }
-//    else
-//    {
-//      if (sift)
-//      {
-//        // Create vector to store the frame_keypoints
-//        feature_extractor->detect(frame_bw_img, keypoints);
-//      }
-//      else // SURF
-//      {
-//        feature_extractor->detect(frame_bw_img, keypoints);
-//      }
-//
-//      feature_extractor->compute(frame_bw_img, keypoints, frame_descriptors);
-//    }
+
     std::cout << "Feature extraction: " << (int)(double(clock() - clock_extraction) / clocks_per_ms) << " ms" << std::endl;
-
-//  imshow("Output", output_frame);
-
-//    BFMatcher matcher(2, true);
-////    matcher.create(4, true);
-//    std::vector<DMatch> matches;
-//    matches.clear();
-//    matcher.match(object_descriptors, descriptors, matches);
 
     clock_matching = clock();
 
@@ -366,28 +320,6 @@ int main(int, char**)
 
     }
 
-//    double max_dist = 0;
-//    double min_dist = 100;
-//
-//    for (int i = 0; i < object_descriptors.rows; i++)
-//    {
-//      double dist = matches[i].distance;
-//      if (dist < FLT_EPSILON)
-//        continue;
-//      if (dist < min_dist)
-//        min_dist = dist;
-//      if (dist > max_dist)
-//        max_dist = dist;
-//    }
-//
-//    for (int i = 0; i < object_descriptors.rows; i++)
-//    {
-//      if (matches[i].distance < 3 * min_dist)
-//      {
-//        good_matches.push_back(matches[i]);
-//      }
-//    }
-
     if (!(enable_gpu && sift))
     {
       for (size_t i=0; i < object_bw_img.size(); i++)
@@ -411,10 +343,6 @@ int main(int, char**)
 
 
     std::cout << "Feature matching: " << (int)(double(clock() - clock_matching) / clocks_per_ms) << " ms" << std::endl;
-//
-//    std::cout << "Found " << object_keypoints.size() << " object_keypoints" << std::endl;
-//    std::cout << "Found " << frame_keypoints.size() << " frame_keypoints" << std::endl;
-    std::cout << std::endl;
 
     Mat img_matches = Mat::zeros(frame_img.size(), CV_8UC3);
 
@@ -443,7 +371,6 @@ int main(int, char**)
         FindHomography(frame_sift_data, homography, &numMatches, 1000, 0.00f, 0.95f, 5.0);
   //      int numFit = ImproveHomography(frame_sift_data, homography, 5, 0.00f, 0.80f, 3.0);
         H = cv::Mat(3, 3, CV_32F, homography);
-  //      std::cout << "Number of matching features: " << numFit << " " << numMatches << " " << 100.0f*numFit/std::min(siftData1.numPts, siftData2.numPts) << "% " << initBlur << " " << thresh << std::endl;
         std::cout << "Number of original features: " <<  object_sift_data.numPts << " " << frame_sift_data.numPts << std::endl;
         std::cout << "Number of matching features: " << numMatches << std::endl;
       }
@@ -466,7 +393,6 @@ int main(int, char**)
         continue;
       }
 
-//      std::cout << "Homography " << H[i] << std::endl;
 
       std::vector<Point2f> obj_corners(4);
       obj_corners[0] = cvPoint(0, 0);
@@ -491,7 +417,6 @@ int main(int, char**)
       }
 
 
-//    std::cout << "Homography: " << (int)(double(clock() - clock_homography) / clocks_per_ms) << " ms" << std::endl;
 
       line(img_matches, scene_corners[0] + Point2f(object_bw_img.at(0).cols, 0), scene_corners[1] + Point2f(object_bw_img.at(0).cols, 0),
            colours.at(i), 4);
@@ -502,6 +427,7 @@ int main(int, char**)
       line(img_matches, scene_corners[3] + Point2f(object_bw_img.at(0).cols, 0), scene_corners[0] + Point2f(object_bw_img.at(0).cols, 0),
            colours.at(i), 4);
     }
+    std::cout << "Homography: " << (int)(double(clock() - clock_homography) / clocks_per_ms) << " ms" << std::endl;
 
     clock_total = clock_now;
     clock_now = clock();

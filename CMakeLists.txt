@@ -64,14 +64,3 @@ target_link_libraries(featurecomparison
   /usr/local/cuda/lib64/libcudadevrt.a ${OpenCV_LIBS}
 )
 
-# install(FILES
-#   ${cuda_sources}
-#   ${sources}
-#   cudaSiftD.cu
-#   CMakeLists.txt
-#   Copyright.txt
-#   DESTINATION .
-# )
-# install(FILES data/left.pgm data/righ.pgm
-#   DESTINATION data
-# )
