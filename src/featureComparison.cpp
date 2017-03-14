@@ -26,7 +26,7 @@ bool enable_gpu = 1;
 
 using namespace cv;
 
-int camera_device = 0;
+int camera_device = 1;
 
 int numOctaves = 5; /* Number of octaves in Gaussian pyramid */
 float initBlur = 1.0f; /* Amount of initial Gaussian blurring in standard deviations */
@@ -78,12 +78,23 @@ int main(int, char**)
     std::cout << "Imported " << imported_objects << " objects." << std::endl;
   }
 
+  // Colors
+
+  std::vector<Scalar> colours;
+  for (size_t i=0; i < imported_objects; i++)
+  {
+    Mat color(5,5, CV_8UC3, Scalar((int)(i*180.0/imported_objects), 255, 255));
+    cvtColor(color, color, COLOR_HSV2BGR);
+    std::cout << "Angle " << (int)(i*180.0/(float)imported_objects) << " colour " << color.at<Vec3b>(Point(0,0)) <<std::endl;
+    colours.push_back(color.at<Vec3b>(Point(0,0)));
+  }
+
   std::vector<Mat> object_bw_img;
 //  object_bw_img.assign(imported_objects, object_img.at(0));
   for (size_t i=0; i < imported_objects; i++)
     {
       object_bw_img.push_back(Mat(object_img.at(0).cols, object_img.at(0).rows, CV_8UC3));
-      cvtColor(object_img.at(0), object_bw_img.back(), COLOR_BGR2GRAY);
+      cvtColor(object_img.at(i), object_bw_img.back(), COLOR_BGR2GRAY);
     }
 
   InitCuda(camera_device);
@@ -132,14 +143,13 @@ int main(int, char**)
 
 
 
-
   cv::Ptr<Feature2D> feature_extractor;
 
   int min_hessian = 400;
   std::vector<KeyPoint> frame_keypoints;
   std::vector<std::vector<KeyPoint> > object_keypoints;
   Mat frame_descriptors;
-  std::vector<std::vector<KeyPoint> >object_descriptors;
+  std::vector<Mat> object_descriptors;
 
   std::vector<cuda::GpuMat> object_gpu_img;
   for (size_t i=0; i < object_bw_img.size(); i++)
@@ -169,6 +179,8 @@ int main(int, char**)
     feature_extractor = xfeatures2d::SIFT::create();
     for (size_t i=0; i < object_bw_img.size(); i++)
     {
+    object_keypoints.push_back(std::vector<KeyPoint>());
+    object_descriptors.push_back(Mat());
     feature_extractor->detect(object_bw_img.at(i), object_keypoints.at(i));
     feature_extractor->compute(object_bw_img.at(i), object_keypoints.at(i), object_descriptors.at(i));
     }
@@ -181,8 +193,24 @@ int main(int, char**)
       surf = new cuda::SURF_CUDA(min_hessian);
       for (size_t i=0; i < object_bw_img.size(); i++)
       {
+      object_gpu_keypoints.push_back(cuda::GpuMat());
+      object_gpu_descriptors.push_back(cuda::GpuMat());
+      object_keypoints.push_back(std::vector<KeyPoint>());
+      try
+      {
       surf->operator()( object_gpu_img.at(i), cuda::GpuMat(), object_gpu_keypoints.at(i), object_gpu_descriptors.at(i));
       surf->downloadKeypoints(object_gpu_keypoints.at(i), object_keypoints.at(i));
+      std::cout << "Found " << object_keypoints.at(i).size() << " keypoints in object " << i << "." << std::endl;
+      }
+      catch (const cv::Exception& e)
+      {
+        std::cout << "Couldn't extract keypoints from object " << i << "." << std::endl;
+        object_bw_img.erase(object_bw_img.begin() + i);
+        object_gpu_keypoints.erase(object_gpu_keypoints.begin() + i);
+        object_gpu_descriptors.erase(object_gpu_descriptors.begin() + i);
+        object_keypoints.erase(object_keypoints.begin() + i);
+        object_gpu_img.erase(object_gpu_img.begin() + i);
+      }
       }
     }
     else
@@ -190,11 +218,14 @@ int main(int, char**)
     feature_extractor = xfeatures2d::SURF::create(min_hessian);
     for (size_t i=0; i < object_bw_img.size(); i++)
     {
+    object_keypoints.push_back(std::vector<KeyPoint>());
+    object_descriptors.push_back(Mat());
     feature_extractor->detect(object_bw_img.at(i), object_keypoints.at(i));
     feature_extractor->compute(object_bw_img.at(i), object_keypoints.at(i), object_descriptors.at(i));
     }
     }
   }
+
 
 //  feature_extractor->compute(object_bw_img, object_keypoints, object_descriptors);
 
@@ -317,8 +348,10 @@ int main(int, char**)
         {
           matches.push_back(std::vector<std::vector<DMatch> >());
           matcher->knnMatch(object_gpu_descriptors.at(i), frame_gpu_descriptors, matches.back(), 2);
-          surf->downloadKeypoints(frame_gpu_keypoints, frame_keypoints);
+          std::cout << "Found " << matches.at(i).size() << " matches for object " << i << std::endl;
         }
+        surf->downloadKeypoints(frame_gpu_keypoints, frame_keypoints);
+        std::cout << "Found " << frame_keypoints.size() << " keypoints in frame."<< std::endl;
       }
     }
     else
@@ -327,8 +360,10 @@ int main(int, char**)
 
       for (size_t i=0; i < object_bw_img.size(); i++)
       {
+        matches.push_back(std::vector<std::vector<DMatch> >());
         matcher.knnMatch(object_descriptors.at(i), frame_descriptors, matches.at(i), 2);
       }
+
     }
 
 //    double max_dist = 0;
@@ -357,6 +392,7 @@ int main(int, char**)
     {
       for (size_t i=0; i < object_bw_img.size(); i++)
       {
+        good_matches.push_back(std::vector<DMatch>());
         for (size_t k = 0; k < std::min(object_keypoints.at(i).size()-1, matches.at(i).size()); k++)
         {
                 if ( (matches[i][k][0].distance < 0.6*(matches[i][k][1].distance)) &&
@@ -367,6 +403,8 @@ int main(int, char**)
                         good_matches[i].push_back(matches[i][k][0]);
                 }
         }
+        std::cout << "Found " << good_matches.at(i).size() << " good matches for object " << i << std::endl;
+
       }
     }
 
@@ -376,35 +414,26 @@ int main(int, char**)
 //
 //    std::cout << "Found " << object_keypoints.size() << " object_keypoints" << std::endl;
 //    std::cout << "Found " << frame_keypoints.size() << " frame_keypoints" << std::endl;
-//    std::cout << "Found " << matches.size() << " matches" << std::endl;
-//    std::cout << "Found " << good_matches.size() << " good matches" << std::endl;
     std::cout << std::endl;
 
-#ifdef video
-    if (!(enable_gpu && sift))
-        {
-          if (good_matches.at(0).size() < 1)
-          {
-            std::cout << "No matches found for first object." << std::endl;
-            continue;
-          }
-        }
-#endif
-
     Mat img_matches = Mat::zeros(frame_img.size(), CV_8UC3);
-    if (good_matches.at(0).size() > 0)
-    {
+
     drawKeypoints(frame_img, frame_keypoints, output_frame, Scalar::all(-1), DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
     drawMatches(object_img.at(0), object_keypoints.at(0), frame_img, frame_keypoints, good_matches.at(0), img_matches);
-    }
-
-
 
     clock_homography = clock();
-    std::vector<Mat> H;
+    std::vector<Mat> H(object_bw_img.size(), Mat());
 
     for (size_t i=0; i < object_bw_img.size(); i++)
     {
+      if (!(enable_gpu && sift))
+          {
+            if (good_matches.at(i).size() < 1)
+            {
+              std::cout << "No matches found for object " << i << "." << std::endl;
+              continue;
+            }
+          }
       std::vector<Point2f> obj;
       std::vector<Point2f> env;
       if (enable_gpu && sift)
@@ -420,13 +449,21 @@ int main(int, char**)
       }
       else
       {
-      for (size_t j = 0; j < good_matches.size(); j++)
+      for (size_t j = 0; j < good_matches.at(i).size(); j++)
       {
         obj.push_back(object_keypoints[i][good_matches[i][j].queryIdx].pt);
         env.push_back(frame_keypoints[good_matches[i][j].trainIdx].pt);
       }
 
-      H.push_back(findHomography(obj, env, CV_RANSAC));
+      if (good_matches.at(i).size() > 0)
+      {
+        H.at(i) = findHomography(obj, env, CV_RANSAC);
+      }
+      }
+
+      if (H.at(i).cols < 1)
+      {
+        continue;
       }
 
 //      std::cout << "Homography " << H[i] << std::endl;
@@ -437,6 +474,8 @@ int main(int, char**)
       obj_corners[2] = cvPoint(object_bw_img.at(i).cols, object_bw_img.at(i).rows);
       obj_corners[3] = cvPoint(0, object_bw_img.at(i).rows);
       std::vector<Point2f> scene_corners(4);
+
+
 
       try
       {
@@ -454,14 +493,14 @@ int main(int, char**)
 
 //    std::cout << "Homography: " << (int)(double(clock() - clock_homography) / clocks_per_ms) << " ms" << std::endl;
 
-      line(img_matches, scene_corners[0] + Point2f(object_bw_img.at(i).cols, 0), scene_corners[1] + Point2f(object_bw_img.at(i).cols, 0),
-           Scalar(0, 255, 0), 4);
-      line(img_matches, scene_corners[1] + Point2f(object_bw_img.at(i).cols, 0), scene_corners[2] + Point2f(object_bw_img.at(i).cols, 0),
-           Scalar(0, 255, 0), 4);
-      line(img_matches, scene_corners[2] + Point2f(object_bw_img.at(i).cols, 0), scene_corners[3] + Point2f(object_bw_img.at(i).cols, 0),
-           Scalar(0, 255, 0), 4);
-      line(img_matches, scene_corners[3] + Point2f(object_bw_img.at(i).cols, 0), scene_corners[0] + Point2f(object_bw_img.at(i).cols, 0),
-           Scalar(0, 255, 0), 4);
+      line(img_matches, scene_corners[0] + Point2f(object_bw_img.at(0).cols, 0), scene_corners[1] + Point2f(object_bw_img.at(0).cols, 0),
+           colours.at(i), 4);
+      line(img_matches, scene_corners[1] + Point2f(object_bw_img.at(0).cols, 0), scene_corners[2] + Point2f(object_bw_img.at(0).cols, 0),
+           colours.at(i), 4);
+      line(img_matches, scene_corners[2] + Point2f(object_bw_img.at(0).cols, 0), scene_corners[3] + Point2f(object_bw_img.at(0).cols, 0),
+           colours.at(i), 4);
+      line(img_matches, scene_corners[3] + Point2f(object_bw_img.at(0).cols, 0), scene_corners[0] + Point2f(object_bw_img.at(0).cols, 0),
+           colours.at(i), 4);
     }
 
     clock_total = clock_now;
