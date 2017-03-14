@@ -10,6 +10,10 @@
 bool sift = 0; //else surf
 bool enable_gpu = 1;
 
+// Path to folder with images of the objects to be recognized.
+String folder_path = "/home/teddy/objects";
+
+
 #include <stdio.h>
 
 #include <opencv2/opencv.hpp>
@@ -46,7 +50,6 @@ int main(int, char**)
   namedWindow("Matches", CV_GUI_NORMAL);
 
   // Load images of objects to search for
-  String folder_path = "/home/teddy/objects";
   std::vector<String> object_files;
 
   std::vector<Mat> object_img;
