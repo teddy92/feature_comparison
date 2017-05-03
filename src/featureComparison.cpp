@@ -7,18 +7,12 @@
 //============================================================================
 
 #define video
-bool sift = 0; //else surf
+int feature_type = 2; // 0 SIFT, 1 SURF, 2 ORB
 bool enable_gpu = 1;
-
-// Path to folder with images of the objects to be recognized.
-String folder_path = "/home/teddy/objects";
-
 
 #include <stdio.h>
 
 #include <opencv2/opencv.hpp>
-#include <opencv2/core.hpp>
-//#include <highgui.h>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/features2d.hpp>
 #include <opencv2/xfeatures2d.hpp>
@@ -28,7 +22,14 @@ String folder_path = "/home/teddy/objects";
 #include "../CudaSift/cudaSift.h"
 //#include "../CudaSift/geomFuncs.cpp"
 
+#include "opencv2/cudaobjdetect.hpp"
+#include "opencv2/cudafeatures2d.hpp"
+//#include "opencv2/gpu/gpu.hpp"
+
 using namespace cv;
+
+// Path to folder with images of the objects to be recognized.
+String folder_path = "/home/teddy/objects";
 
 int camera_device = 1;
 
@@ -48,6 +49,7 @@ int main(int, char**)
     return -1;
 
   namedWindow("Matches", CV_GUI_NORMAL);
+  std::cout << "feature_type = " << feature_type << std::endl;
 
   // Load images of objects to search for
   std::vector<String> object_files;
@@ -80,7 +82,7 @@ int main(int, char**)
     std::cout << "Imported " << imported_objects << " objects." << std::endl;
   }
 
-  // Create array of colors for each object
+  // Create array with a color for each object
 
   std::vector<Scalar> colours;
   for (size_t i=0; i < imported_objects; i++)
@@ -91,7 +93,7 @@ int main(int, char**)
     colours.push_back(color.at<Vec3b>(Point(0,0)));
   }
 
-
+  // Convert images to greyscale
   std::vector<Mat> object_bw_img;
   for (size_t i=0; i < imported_objects; i++)
     {
@@ -107,7 +109,7 @@ int main(int, char**)
   CudaImage frame_cuda_sift_img;
 
 
-  if (enable_gpu && sift)
+  if (enable_gpu && feature_type == 0)
   {
   InitCuda(camera_device);
 
@@ -161,11 +163,13 @@ int main(int, char**)
   }
 
   cuda::GpuMat frame_gpu_keypoints, frame_gpu_descriptors;
-  std::vector<cuda::GpuMat> object_gpu_keypoints, object_gpu_descriptors;
+  std::vector<cuda::GpuMat> object_gpu_keypoints, object_gpu_descriptors(CV_32F);
 
   cuda::SURF_CUDA* surf;
 
-  if (sift)
+  cv::Ptr<cv::cuda::ORB> gpu_orb = cv::cuda::ORB::create();
+
+  if (feature_type == 0)
   {
     if (enable_gpu)
     {
@@ -182,38 +186,38 @@ int main(int, char**)
     feature_extractor = xfeatures2d::SIFT::create();
     for (size_t i=0; i < object_bw_img.size(); i++)
     {
-    object_keypoints.push_back(std::vector<KeyPoint>());
-    object_descriptors.push_back(Mat());
-    feature_extractor->detect(object_bw_img.at(i), object_keypoints.at(i));
-    feature_extractor->compute(object_bw_img.at(i), object_keypoints.at(i), object_descriptors.at(i));
+      object_keypoints.push_back(std::vector<KeyPoint>());
+      object_descriptors.push_back(Mat());
+      feature_extractor->detect(object_bw_img.at(i), object_keypoints.at(i));
+      feature_extractor->compute(object_bw_img.at(i), object_keypoints.at(i), object_descriptors.at(i));
     }
     }
   }
-  else // SURF
+  else if (feature_type == 1)// SURF
   {
     if (enable_gpu)
     {
       surf = new cuda::SURF_CUDA(min_hessian);
       for (size_t i=0; i < object_bw_img.size(); i++)
       {
-      object_gpu_keypoints.push_back(cuda::GpuMat());
-      object_gpu_descriptors.push_back(cuda::GpuMat());
-      object_keypoints.push_back(std::vector<KeyPoint>());
-      try
-      {
-      surf->operator()( object_gpu_img.at(i), cuda::GpuMat(), object_gpu_keypoints.at(i), object_gpu_descriptors.at(i));
-      surf->downloadKeypoints(object_gpu_keypoints.at(i), object_keypoints.at(i));
-      std::cout << "Found " << object_keypoints.at(i).size() << " keypoints in object " << i << "." << std::endl;
-      }
-      catch (const cv::Exception& e)
-      {
-        std::cout << "Couldn't extract keypoints from object " << i << "." << std::endl;
-        object_bw_img.erase(object_bw_img.begin() + i);
-        object_gpu_keypoints.erase(object_gpu_keypoints.begin() + i);
-        object_gpu_descriptors.erase(object_gpu_descriptors.begin() + i);
-        object_keypoints.erase(object_keypoints.begin() + i);
-        object_gpu_img.erase(object_gpu_img.begin() + i);
-      }
+        object_gpu_keypoints.push_back(cuda::GpuMat());
+        object_gpu_descriptors.push_back(cuda::GpuMat(CV_32F));
+        object_keypoints.push_back(std::vector<KeyPoint>());
+        try
+        {
+          surf->operator()( object_gpu_img.at(i), cuda::GpuMat(), object_gpu_keypoints.at(i), object_gpu_descriptors.at(i));
+          surf->downloadKeypoints(object_gpu_keypoints.at(i), object_keypoints.at(i));
+          std::cout << "Found " << object_keypoints.at(i).size() << " keypoints in object " << i << "." << std::endl;
+        }
+        catch (const cv::Exception& e)
+        {
+          std::cout << "Couldn't extract keypoints from object " << i << "." << std::endl;
+          object_bw_img.erase(object_bw_img.begin() + i);
+          object_gpu_keypoints.erase(object_gpu_keypoints.begin() + i);
+          object_gpu_descriptors.erase(object_gpu_descriptors.begin() + i);
+          object_keypoints.erase(object_keypoints.begin() + i);
+          object_gpu_img.erase(object_gpu_img.begin() + i);
+        }
       }
     }
     else
@@ -221,11 +225,37 @@ int main(int, char**)
     feature_extractor = xfeatures2d::SURF::create(min_hessian);
     for (size_t i=0; i < object_bw_img.size(); i++)
     {
-    object_keypoints.push_back(std::vector<KeyPoint>());
-    object_descriptors.push_back(Mat());
-    feature_extractor->detect(object_bw_img.at(i), object_keypoints.at(i));
-    feature_extractor->compute(object_bw_img.at(i), object_keypoints.at(i), object_descriptors.at(i));
+      object_keypoints.push_back(std::vector<KeyPoint>());
+      object_descriptors.push_back(Mat());
+      feature_extractor->detect(object_bw_img.at(i), object_keypoints.at(i));
+      feature_extractor->compute(object_bw_img.at(i), object_keypoints.at(i), object_descriptors.at(i));
     }
+    }
+  }
+  else // ORB
+  {
+    if (enable_gpu)
+    {
+      for (size_t i=0; i < object_bw_img.size(); i++)
+      {
+        object_gpu_keypoints.push_back(cuda::GpuMat());
+        object_gpu_descriptors.push_back(cuda::GpuMat(CV_32F));
+        object_keypoints.push_back(std::vector<KeyPoint>());
+        try
+        {
+          gpu_orb->detectAndCompute(object_gpu_img.at(i), noArray(), object_keypoints.at(i), object_gpu_descriptors.at(i));
+          std::cout << "Found " << object_keypoints.at(i).size() << " keypoints in object " << i << "." << std::endl;
+        }
+        catch (const cv::Exception& e)
+        {
+          std::cout << "Couldn't extract keypoints from object " << i << "." << std::endl;
+          object_bw_img.erase(object_bw_img.begin() + i);
+          object_gpu_keypoints.erase(object_gpu_keypoints.begin() + i);
+          object_gpu_descriptors.erase(object_gpu_descriptors.begin() + i);
+          object_keypoints.erase(object_keypoints.begin() + i);
+          object_gpu_img.erase(object_gpu_img.begin() + i);
+        }
+      }
     }
   }
 
@@ -235,7 +265,7 @@ int main(int, char**)
   int clocks_per_ms = CLOCKS_PER_SEC / 1000;
 
 #ifdef video
-  while (true)
+  while (cvWaitKey(1) != '\33')
   {
 #endif
 
@@ -254,7 +284,7 @@ int main(int, char**)
 
     clock_extraction = clock();
 
-    if (sift)
+    if (feature_type == 0)
     {
       if (enable_gpu)
       {
@@ -269,7 +299,7 @@ int main(int, char**)
       feature_extractor->compute(frame_bw_img, frame_keypoints, frame_descriptors);
       }
     }
-    else // SURF
+    else if (feature_type == 1)// SURF
     {
       if (enable_gpu)
       {
@@ -282,6 +312,14 @@ int main(int, char**)
       feature_extractor->compute(frame_bw_img, frame_keypoints, frame_descriptors);
       }
     }
+    else // ORB
+    {
+      if (enable_gpu)
+      {
+        cuda::GpuMat frame_gpu_img(frame_bw_img);
+        gpu_orb->detectAndCompute(frame_gpu_img, noArray(), frame_keypoints, frame_gpu_descriptors);
+      }
+    }
 
     std::cout << "Feature extraction: " << (int)(double(clock() - clock_extraction) / clocks_per_ms) << " ms" << std::endl;
 
@@ -290,25 +328,29 @@ int main(int, char**)
     std::vector<std::vector<DMatch> > good_matches;
 //    std::vector<DMatch> matches;
     std::vector<std::vector<std::vector< DMatch> > > matches;
-
     if (enable_gpu)
     {
-      if (sift)
+      if (feature_type == 0)
       {
         MatchSiftData(frame_sift_data, object_sift_data);
       }
       else
       {
-        Ptr< cuda::DescriptorMatcher > matcher = cuda::DescriptorMatcher::createBFMatcher();
+        Ptr< cuda::DescriptorMatcher > matcher = cuda::DescriptorMatcher::createBFMatcher(cv::NORM_HAMMING);
 //        std::vector< std::vector< DMatch> > matches;
+        std::cout << "Matching..." << std::endl;
         for (size_t i=0; i < object_bw_img.size(); i++)
         {
           matches.push_back(std::vector<std::vector<DMatch> >());
           matcher->knnMatch(object_gpu_descriptors.at(i), frame_gpu_descriptors, matches.back(), 2);
           std::cout << "Found " << matches.at(i).size() << " matches for object " << i << std::endl;
         }
-        surf->downloadKeypoints(frame_gpu_keypoints, frame_keypoints);
-        std::cout << "Found " << frame_keypoints.size() << " keypoints in frame."<< std::endl;
+        if (feature_type == 1)
+        {
+          surf->downloadKeypoints(frame_gpu_keypoints, frame_keypoints);
+          std::cout << "Found " << frame_keypoints.size() << " keypoints in frame."<< std::endl;
+          std::cout << "feature_type = " << feature_type << std::endl;
+        }
       }
     }
     else
@@ -323,21 +365,36 @@ int main(int, char**)
 
     }
 
-    if (!(enable_gpu && sift))
+
+
+    if (!(enable_gpu && feature_type == 0))
     {
       for (size_t i=0; i < object_bw_img.size(); i++)
       {
         good_matches.push_back(std::vector<DMatch>());
-        for (size_t k = 0; k < std::min(object_keypoints.at(i).size()-1, matches.at(i).size()); k++)
-        {
-                if ( (matches[i][k][0].distance < 0.6*(matches[i][k][1].distance)) &&
-                                ((int)matches[i][k].size() <= 2 && (int)matches[i][k].size()>0) )
-                {
-                        // take the first result only if its distance is smaller than 0.6*second_best_dist
-                        // that means this descriptor is ignored if the second distance is bigger or of similar
-                        good_matches[i].push_back(matches[i][k][0]);
-                }
+
+        for(std::vector<std::vector<cv::DMatch> >::const_iterator it = matches[i].begin(); it != matches[i].end(); ++it) {
+            if(it->size() > 1 && (*it)[0].distance/(*it)[1].distance < 0.8) {
+              good_matches[i].push_back((*it)[0]);
+            }
         }
+
+
+//        for (size_t k = 0; k < std::min(object_keypoints.at(i).size()-1, matches.at(i).size()); k++)
+//        {
+//                if ( (matches[i][k][0].distance < 0.6*(matches[i][k][1].distance)) &&
+//                                ((int)matches[i][k].size() <= 2 && (int)matches[i][k].size()>0) )
+//                {
+//                        // take the first result only if its distance is smaller than 0.6*second_best_dist
+//                        // that means this descriptor is ignored if the second distance is bigger or similar
+//                        good_matches[i].push_back(matches[i][k][0]);
+//                }
+//                else
+//                {
+//                  std::cout << "First and second match distance: " << matches[i][k][0].distance << " "<< matches[i][k][1].distance << std::endl;
+//                  std::cout << "Number of match candidates "<< matches[i][k].size() << std::endl;
+//                }
+//        }
         std::cout << "Found " << good_matches.at(i).size() << " good matches for object " << i << std::endl;
 
       }
@@ -357,7 +414,7 @@ int main(int, char**)
 
     for (size_t i=0; i < object_bw_img.size(); i++)
     {
-      if (!(enable_gpu && sift))
+      if (!(enable_gpu && feature_type == 0))
           {
             if (good_matches.at(i).size() < 1)
             {
@@ -367,7 +424,7 @@ int main(int, char**)
           }
       std::vector<Point2f> obj;
       std::vector<Point2f> env;
-      if (enable_gpu && sift)
+      if (enable_gpu && feature_type == 0)
       {
         float homography[9];
         int numMatches;
@@ -446,18 +503,18 @@ int main(int, char**)
             Scalar::all(255), 2, 8);
     imshow("Matches", img_matches);
 
+
 #ifdef video
-    if (waitKey(30) >= 0)
-      break;
   }
 #else
   waitKey(0);
 #endif
-  if (enable_gpu && sift)
+  if (enable_gpu && feature_type == 0)
   {
   FreeSiftData(frame_sift_data);
   FreeSiftData(object_sift_data);
   }
+  std::cout << "Terminating" << std::endl;
+
   return 0;
 }
-

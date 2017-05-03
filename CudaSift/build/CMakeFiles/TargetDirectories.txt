@@ -1,1 +1,0 @@
-/home/teddy/private_workspace/sift/CudaSift/build/CMakeFiles/cudasift.dir
