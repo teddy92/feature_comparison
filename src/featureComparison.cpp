@@ -7,8 +7,8 @@
 //============================================================================
 
 #define video
-int feature_type = 2; // 0 SIFT, 1 SURF, 2 ORB
-bool enable_gpu = 1;
+int feature_type = 0; // 0 SIFT, 1 SURF, 2 ORB
+bool enable_gpu = 0;
 
 #include <stdio.h>
 
@@ -336,7 +336,15 @@ int main(int, char**)
       }
       else
       {
-        Ptr< cuda::DescriptorMatcher > matcher = cuda::DescriptorMatcher::createBFMatcher(cv::NORM_HAMMING);
+        Ptr< cuda::DescriptorMatcher > matcher;
+        if (feature_type == 1)
+        {
+          matcher = cuda::DescriptorMatcher::createBFMatcher();
+        }
+        else
+        {
+          matcher = cuda::DescriptorMatcher::createBFMatcher(cv::NORM_HAMMING);
+        }
 //        std::vector< std::vector< DMatch> > matches;
         std::cout << "Matching..." << std::endl;
         for (size_t i=0; i < object_bw_img.size(); i++)
@@ -372,12 +380,30 @@ int main(int, char**)
       for (size_t i=0; i < object_bw_img.size(); i++)
       {
         good_matches.push_back(std::vector<DMatch>());
-
+//
         for(std::vector<std::vector<cv::DMatch> >::const_iterator it = matches[i].begin(); it != matches[i].end(); ++it) {
-            if(it->size() > 1 && (*it)[0].distance/(*it)[1].distance < 0.8) {
+            if(it->size() > 1 && (*it)[0].distance/(*it)[1].distance < 0.9) {
               good_matches[i].push_back((*it)[0]);
             }
+//            else
+//            {
+//              std::cout << "Distance 1: " << (*it)[0].distance << " Distance 2: "<< (*it)[1].distance << " Ratio: "<< (*it)[0].distance/(*it)[1].distance << std::endl;
+//            }
         }
+
+//        double max_dist = 0; double min_dist = 100;
+//        for( int j = 0; j < object_bw_img.size(); j++)
+//        {
+//          double dist = matches[i][j][0].distance;
+//            if( dist < min_dist ) min_dist = dist;
+//            if( dist > max_dist ) max_dist = dist;
+//        }
+//
+//        for( int j = 0; j < object_bw_img.size(); j++ )
+//
+//        { if( matches[i][j][0].distance < (max_dist/1.6) )
+//            { good_matches[i].push_back( matches[i][j][0]); }
+//        }
 
 
 //        for (size_t k = 0; k < std::min(object_keypoints.at(i).size()-1, matches.at(i).size()); k++)
