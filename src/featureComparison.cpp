@@ -1,5 +1,5 @@
 //============================================================================
-// Name        : pin_detection.cpp
+// Name        : Feature Comparison
 // Author      :
 // Version     :
 // Copyright   : Your copyright notice
@@ -7,8 +7,8 @@
 //============================================================================
 
 #define video
-int feature_type = 0; // 0 SIFT, 1 SURF, 2 ORB
-bool enable_gpu = 0;
+int feature_type = 1; // 0 SIFT, 1 SURF, 2 ORB
+bool enable_gpu = 1;
 
 #include <stdio.h>
 
@@ -30,8 +30,9 @@ using namespace cv;
 
 // Path to folder with images of the objects to be recognized.
 String folder_path = "/home/teddy/objects";
+String video_path = "/home/teddy/test.mkv";
 
-int camera_device = 1;
+int camera_device = 0;
 
 int numOctaves = 5; /* Number of octaves in Gaussian pyramid */
 float initBlur = 1.0f; /* Amount of initial Gaussian blurring in standard deviations */
@@ -39,17 +40,45 @@ float thresh = 3.5f; /* Threshold on difference of Gaussians for feature pruning
 float minScale = 0.0f; /* Minimum acceptable scale to remove fine-scale features */
 bool upScale = true; /* Whether to upscale image before extraction */
 
+int MAX_FOCUS = 250;
+int focus = 0;
+int match_thres = 70;
+
+void settingsWindow()
+{
+  namedWindow("Settings", 0);
+
+  createTrackbar("Focus", "Settings", &focus, MAX_FOCUS);
+  createTrackbar("Match thres", "Settings", &match_thres, 100);
+}
+
+bool intersection(Point2f o1, Point2f p1, Point2f o2, Point2f p2)
+{
+    Point2f x = o2 - o1;
+    Point2f d1 = p1 - o1;
+    Point2f d2 = p2 - o2;
+
+    float cross = d1.x*d2.y - d1.y*d2.x;
+    if (abs(cross) < /*EPS*/1e-8)
+        return false;
+
+    return true;
+}
 
 int main(int, char**)
 {
   // Open the default camera
   VideoCapture cap(camera_device);
+//  VideoCapture cap(video_path);
   // Check if camera works
   if (!cap.isOpened())
     return -1;
 
+  settingsWindow();
+
   namedWindow("Matches", CV_GUI_NORMAL);
   std::cout << "feature_type = " << feature_type << std::endl;
+  std::cout << "Image resolution: " << cap.get(CV_CAP_PROP_FRAME_WIDTH) << "x" << cap.get(CV_CAP_PROP_FRAME_HEIGHT) << std::endl;
 
   // Load images of objects to search for
   std::vector<String> object_files;
@@ -108,6 +137,32 @@ int main(int, char**)
   cv::Mat frame_sift_img;
   CudaImage frame_cuda_sift_img;
 
+  VideoWriter outputVideo;
+  outputVideo.open("/home/teddy/output.avi",
+                   static_cast<int>(cap.get(CV_CAP_PROP_FOURCC)),
+                   cap.get(CV_CAP_PROP_FPS),
+                   Size((int) cap.get(CV_CAP_PROP_FRAME_WIDTH) + object_bw_img.at(0).cols,
+                   (int) cap.get(CV_CAP_PROP_FRAME_HEIGHT)), true);
+
+  if (!outputVideo.isOpened())
+  {
+      std::cout  << "Could not open the output video " << std::endl;
+      return -1;
+  }
+
+//  int ex = static_cast<int>(cap.get(CAP_PROP_FOURCC));     // Get Codec Type- Int form
+//  // Transform from int to char via Bitwise operators
+//  char EXT[] = {(char)(ex & 0XFF) , (char)((ex & 0XFF00) >> 8),(char)((ex & 0XFF0000) >> 16),(char)((ex & 0XFF000000) >> 24), 0};
+//  Size S = Size((int) cap.get(CAP_PROP_FRAME_WIDTH),    // Acquire input size
+//                (int) cap.get(CAP_PROP_FRAME_HEIGHT));
+//  VideoWriter outputVideo;                                        // Open the output
+//  outputVideo.open("/home/teddy/output.avi", ex, cap.get(CAP_PROP_FPS), S, true);
+//  if (!outputVideo.isOpened())
+//  {
+//      std::cout  << "Could not open the output video " << std::endl;
+//      return -1;
+//  }
+
 
   if (enable_gpu && feature_type == 0)
   {
@@ -124,6 +179,7 @@ int main(int, char**)
 #ifdef video
   while (true)
   {
+
     // Get a frame from camera
     cap >> ini_frame;
     if (ini_frame.cols < cap.get(CV_CAP_PROP_FRAME_WIDTH))
@@ -160,6 +216,7 @@ int main(int, char**)
   for (size_t i=0; i < object_bw_img.size(); i++)
   {
     object_gpu_img.push_back(cuda::GpuMat(object_bw_img.at(i)));
+    object_cuda_sift_img.Download();
   }
 
   cuda::GpuMat frame_gpu_keypoints, frame_gpu_descriptors;
@@ -173,7 +230,7 @@ int main(int, char**)
   {
     if (enable_gpu)
     {
-//      object_bw_img.convertTo(object_sift_img, CV_32FC1);
+      object_bw_img.at(0).convertTo(object_sift_img, CV_32FC1);
       std::cout << "cols " << object_sift_img.cols << std::endl;
       object_cuda_sift_img.Download();
       std::cout << "test" << std::endl;
@@ -184,14 +241,16 @@ int main(int, char**)
     {
     // Create a Sift extractor object
     feature_extractor = xfeatures2d::SIFT::create();
-    for (size_t i=0; i < object_bw_img.size(); i++)
-    {
-      object_keypoints.push_back(std::vector<KeyPoint>());
-      object_descriptors.push_back(Mat());
-      feature_extractor->detect(object_bw_img.at(i), object_keypoints.at(i));
-      feature_extractor->compute(object_bw_img.at(i), object_keypoints.at(i), object_descriptors.at(i));
+        for (size_t i=0; i < object_bw_img.size(); i++)
+        {
+           object_keypoints.push_back(std::vector<KeyPoint>());
+           object_descriptors.push_back(Mat());
+          feature_extractor->detect(object_bw_img.at(i), object_keypoints.at(i));
+          feature_extractor->compute(object_bw_img.at(i), object_keypoints.at(i), object_descriptors.at(i));
+        }
+
     }
-    }
+
   }
   else if (feature_type == 1)// SURF
   {
@@ -272,14 +331,16 @@ int main(int, char**)
     Mat frame_img, frame_bw_img, output_frame;
 
 #ifdef video
+    cap.set(CV_CAP_PROP_FOCUS, focus);
     // Get a frame from camera
     cap >> frame_img;
-    if (frame_img.cols < 1)
+    if (frame_img.empty())
       continue;
 #else
     frame_img = imread("/home/teddy/env.jpg", 1);
 #endif
 
+    std::cout << "heyy" << std::endl;
     cvtColor(frame_img, frame_bw_img, COLOR_BGR2GRAY);
 
     clock_extraction = clock();
@@ -382,7 +443,7 @@ int main(int, char**)
         good_matches.push_back(std::vector<DMatch>());
 //
         for(std::vector<std::vector<cv::DMatch> >::const_iterator it = matches[i].begin(); it != matches[i].end(); ++it) {
-            if(it->size() > 1 && (*it)[0].distance/(*it)[1].distance < 0.9) {
+            if(it->size() > 1 && (*it)[0].distance/(*it)[1].distance < match_thres/100.0) {
               good_matches[i].push_back((*it)[0]);
             }
 //            else
@@ -432,8 +493,21 @@ int main(int, char**)
 
     Mat img_matches = Mat::zeros(frame_img.size(), CV_8UC3);
 
-    drawKeypoints(frame_img, frame_keypoints, output_frame, Scalar::all(-1), DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
-    drawMatches(object_img.at(0), object_keypoints.at(0), frame_img, frame_keypoints, good_matches.at(0), img_matches);
+    if (enable_gpu && feature_type == 0)
+    {
+          frame_img.copyTo(img_matches);
+        }
+    else
+        {
+          try {
+      //    drawKeypoints(frame_img, frame_keypoints, output_frame, Scalar::all(-1), DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+          drawMatches(object_img.at(0), object_keypoints.at(0), frame_img, frame_keypoints, good_matches.at(0), img_matches);
+          }
+          catch(...)
+          {
+            std::cout << "Error while drawing" << std::endl;
+          }
+        }
 
     clock_homography = clock();
     std::vector<Mat> H(object_bw_img.size(), Mat());
@@ -455,10 +529,17 @@ int main(int, char**)
         float homography[9];
         int numMatches;
         FindHomography(frame_sift_data, homography, &numMatches, 1000, 0.00f, 0.95f, 5.0);
+        std::cout << "Did homography" << std::endl;
   //      int numFit = ImproveHomography(frame_sift_data, homography, 5, 0.00f, 0.80f, 3.0);
-        H = cv::Mat(3, 3, CV_32F, homography);
+//        std::vector<float> tmp_vec (homography, homography + sizeof(homography) / sizeof(homography[0]) );
+//        H.at(0) = cv::Mat(tmp_vec).reshape(3, 3);
+        H.at(0) = cv::Mat(3, 3, CV_32FC1, homography);
         std::cout << "Number of original features: " <<  object_sift_data.numPts << " " << frame_sift_data.numPts << std::endl;
         std::cout << "Number of matching features: " << numMatches << std::endl;
+//        for (int ij=0; ij < 9; ij++)
+//        {
+//        std::cout << "Homography "<< homography[ij] << std::endl;
+//        }
       }
       else
       {
@@ -474,7 +555,7 @@ int main(int, char**)
       }
       }
 
-      if (H.at(i).cols < 1)
+      if (H.at(i).cols < 3)
       {
         continue;
       }
@@ -504,14 +585,31 @@ int main(int, char**)
 
 
 
-      line(img_matches, scene_corners[0] + Point2f(object_bw_img.at(0).cols, 0), scene_corners[1] + Point2f(object_bw_img.at(0).cols, 0),
+      if (isContourConvex(scene_corners))
+      {
+      if (enable_gpu && feature_type == 0)
+          {
+      line(img_matches, scene_corners[0], scene_corners[1],
            colours.at(i), 4);
-      line(img_matches, scene_corners[1] + Point2f(object_bw_img.at(0).cols, 0), scene_corners[2] + Point2f(object_bw_img.at(0).cols, 0),
+      line(img_matches, scene_corners[1], scene_corners[2] + Point2f(object_bw_img.at(0).cols, 0),
            colours.at(i), 4);
-      line(img_matches, scene_corners[2] + Point2f(object_bw_img.at(0).cols, 0), scene_corners[3] + Point2f(object_bw_img.at(0).cols, 0),
+      line(img_matches, scene_corners[2], scene_corners[3] + Point2f(object_bw_img.at(0).cols, 0),
            colours.at(i), 4);
-      line(img_matches, scene_corners[3] + Point2f(object_bw_img.at(0).cols, 0), scene_corners[0] + Point2f(object_bw_img.at(0).cols, 0),
+      line(img_matches, scene_corners[3], scene_corners[0] + Point2f(object_bw_img.at(0).cols, 0),
            colours.at(i), 4);
+          }
+      else
+      {
+  line(img_matches, scene_corners[0] + Point2f(object_bw_img.at(0).cols, 0), scene_corners[1] + Point2f(object_bw_img.at(0).cols, 0),
+       colours.at(i), 4);
+  line(img_matches, scene_corners[1] + Point2f(object_bw_img.at(0).cols, 0), scene_corners[2] + Point2f(object_bw_img.at(0).cols, 0),
+       colours.at(i), 4);
+  line(img_matches, scene_corners[2] + Point2f(object_bw_img.at(0).cols, 0), scene_corners[3] + Point2f(object_bw_img.at(0).cols, 0),
+       colours.at(i), 4);
+  line(img_matches, scene_corners[3] + Point2f(object_bw_img.at(0).cols, 0), scene_corners[0] + Point2f(object_bw_img.at(0).cols, 0),
+       colours.at(i), 4);
+      }
+      }
     }
     std::cout << "Homography: " << (int)(double(clock() - clock_homography) / clocks_per_ms) << " ms" << std::endl;
 
@@ -525,9 +623,10 @@ int main(int, char**)
                                 2, 2, &baseline);
     Point text_origin(img_matches.cols - textSize.width,
                   textSize.height + 10);
-    putText(img_matches, elapsed_string, text_origin, FONT_HERSHEY_PLAIN, 2,
-            Scalar::all(255), 2, 8);
+//    putText(img_matches, elapsed_string, text_origin, FONT_HERSHEY_PLAIN, 2,
+//            Scalar::all(255), 2, 8);
     imshow("Matches", img_matches);
+    outputVideo << img_matches;
 
 
 #ifdef video
